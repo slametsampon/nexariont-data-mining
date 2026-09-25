@@ -172,10 +172,155 @@ class ShiftReportParser:
                         "%d/%m/%Y",
                     ).date()
 
+        report_date = self._extract_report_level_date(
+            worksheet
+        )
+
+        if report_date is not None:
+            return report_date
+
         raise ValueError(
             f"Sampling Date tidak ditemukan "
             f"untuk block column {item_col}."
         )
+
+    @classmethod
+    def _extract_report_level_date(
+        cls,
+        worksheet,
+    ) -> date | None:
+        """
+        Fallback untuk source yang menyatakan tanggal pada
+        field report-level 'Date/Day'.
+
+        Contoh source yang sudah diverifikasi:
+
+            Date/Day : Senin, 24 Agustus 2026
+
+        Method ini hanya membaca tanggal textual Indonesia
+        yang terikat pada field Date/Day. Tidak menginfer
+        tanggal dari filename, worksheet name, file timestamp,
+        atau cell lain yang tidak terikat pada field tersebut.
+        """
+
+        search_end_row = min(
+            worksheet.max_row,
+            20,
+        )
+
+        for row_number in range(
+            1,
+            search_end_row + 1,
+        ):
+
+            for column_number in range(
+                1,
+                worksheet.max_column + 1,
+            ):
+
+                value = cls._cell_value(
+                    worksheet,
+                    row_number,
+                    column_number,
+                )
+
+                if not isinstance(
+                    value,
+                    str,
+                ):
+                    continue
+
+                normalized = (
+                    cls._normalize_text(value)
+                    .rstrip(":")
+                    .strip()
+                )
+
+                if normalized != "date/day":
+                    continue
+
+                search_end_col = min(
+                    worksheet.max_column,
+                    column_number + 7,
+                )
+
+                for date_col in range(
+                    column_number,
+                    search_end_col + 1,
+                ):
+
+                    candidate = cls._cell_value(
+                        worksheet,
+                        row_number,
+                        date_col,
+                    )
+
+                    parsed_date = (
+                        cls._parse_indonesian_textual_date(
+                            candidate
+                        )
+                    )
+
+                    if parsed_date is not None:
+                        return parsed_date
+
+        return None
+
+    @staticmethod
+    def _parse_indonesian_textual_date(
+        value: Any,
+    ) -> date | None:
+        """
+        Parse textual date Indonesia yang digunakan pada
+        report-level Date/Day.
+
+        Contoh:
+            Senin, 24 Agustus 2026
+            Minggu, 30 Agustus 2026
+            24 Agustus 2026
+        """
+
+        if not isinstance(
+            value,
+            str,
+        ):
+            return None
+
+        match = re.search(
+            r"\b(\d{1,2})\s+"
+            r"(Januari|Februari|Maret|April|Mei|Juni|"
+            r"Juli|Agustus|September|Oktober|November|Desember)"
+            r"\s+(\d{4})\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+
+        if not match:
+            return None
+
+        month_numbers = {
+            "januari": 1,
+            "februari": 2,
+            "maret": 3,
+            "april": 4,
+            "mei": 5,
+            "juni": 6,
+            "juli": 7,
+            "agustus": 8,
+            "september": 9,
+            "oktober": 10,
+            "november": 11,
+            "desember": 12,
+        }
+
+        day = int(match.group(1))
+        month = month_numbers[match.group(2).lower()]
+        year = int(match.group(3))
+
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
 
     # ---------------------------------------------------------
     # Block parser
