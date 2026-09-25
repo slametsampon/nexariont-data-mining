@@ -113,7 +113,6 @@ class XlsWorksheetAdapter:
     def _convert_value(
         cell: xlrd.sheet.Cell,
     ) -> Any:
-
         """
         Konversi minimum dan konservatif.
 
@@ -168,8 +167,66 @@ class WorkbookReader:
     Parser tidak perlu mengetahui format source.
     """
 
-    def __init__(self, file_path: Path):
+    def __init__(
+        self,
+        file_path: Path,
+    ):
         self.file_path = Path(file_path)
+
+    def get_worksheet_names(
+        self,
+    ) -> list[str]:
+        """
+        Mengembalikan seluruh nama worksheet dari workbook.
+
+        Supported:
+        - .xls  : xlrd
+        - .xlsx : openpyxl
+
+        Method ini hanya melakukan worksheet discovery.
+        Tidak melakukan parsing data.
+        """
+
+        if not self.file_path.exists():
+            raise FileNotFoundError(
+                f"File tidak ditemukan: {self.file_path}"
+            )
+
+        extension = self.file_path.suffix.lower()
+
+        if extension == ".xls":
+
+            workbook = xlrd.open_workbook(
+                filename=str(self.file_path),
+                on_demand=True,
+            )
+
+            try:
+                return workbook.sheet_names()
+
+            finally:
+                workbook.release_resources()
+
+        if extension == ".xlsx":
+
+            workbook = load_workbook(
+                filename=self.file_path,
+                data_only=True,
+                read_only=True,
+            )
+
+            try:
+                return list(
+                    workbook.sheetnames
+                )
+
+            finally:
+                workbook.close()
+
+        raise ValueError(
+            "Format input tidak didukung. "
+            "Gunakan file .xls atau .xlsx"
+        )
 
     def load_worksheet(
         self,
@@ -224,7 +281,9 @@ class WorkbookReader:
             worksheet_name
         )
 
-        return XlsWorksheetAdapter(sheet)
+        return XlsWorksheetAdapter(
+            sheet
+        )
 
     def _load_xlsx(
         self,
@@ -249,4 +308,6 @@ class WorkbookReader:
                 f"Worksheet tersedia: {available}"
             )
 
-        return workbook[worksheet_name]
+        return workbook[
+            worksheet_name
+        ]
