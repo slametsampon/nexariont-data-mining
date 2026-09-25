@@ -1,8 +1,32 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import xlrd
 from openpyxl import load_workbook
+
+
+@dataclass(frozen=True)
+class WorksheetInfo:
+    """
+    Metadata worksheet untuk discovery dan visibility filtering.
+
+    visibility menyimpan nilai visibility dari source workbook
+    dalam bentuk integer internal:
+
+        0 = visible
+        1 = hidden
+        2 = very hidden
+
+    Worksheet hanya menjadi candidate parsing jika visible.
+    """
+
+    name: str
+    visibility: int
+
+    @property
+    def is_visible(self) -> bool:
+        return self.visibility == 0
 
 
 class CellAdapter:
@@ -227,6 +251,93 @@ class WorkbookReader:
             "Format input tidak didukung. "
             "Gunakan file .xls atau .xlsx"
         )
+
+    def get_worksheet_info(
+        self,
+    ) -> list[WorksheetInfo]:
+        """
+        Mengembalikan metadata seluruh worksheet,
+        termasuk visibility.
+
+        Visible worksheet dapat menjadi candidate parsing.
+        Hidden/non-visible worksheet tidak menjadi candidate.
+        """
+
+        if not self.file_path.exists():
+            raise FileNotFoundError(
+                f"File tidak ditemukan: {self.file_path}"
+            )
+
+        extension = self.file_path.suffix.lower()
+
+        if extension == ".xls":
+
+            workbook = xlrd.open_workbook(
+                filename=str(self.file_path),
+                on_demand=True,
+            )
+
+            try:
+                return [
+                    WorksheetInfo(
+                        name=sheet.name,
+                        visibility=sheet.visibility,
+                    )
+                    for sheet in workbook.sheets()
+                ]
+
+            finally:
+                workbook.release_resources()
+
+        if extension == ".xlsx":
+
+            workbook = load_workbook(
+                filename=self.file_path,
+                data_only=True,
+                read_only=True,
+            )
+
+            try:
+                visibility_map = {
+                    "visible": 0,
+                    "hidden": 1,
+                    "veryHidden": 2,
+                }
+
+                return [
+                    WorksheetInfo(
+                        name=sheet.title,
+                        visibility=visibility_map.get(
+                            sheet.sheet_state,
+                            -1,
+                        ),
+                    )
+                    for sheet in workbook.worksheets
+                ]
+
+            finally:
+                workbook.close()
+
+        raise ValueError(
+            "Format input tidak didukung. "
+            "Gunakan file .xls atau .xlsx"
+        )
+
+    def get_visible_worksheet_names(
+        self,
+    ) -> list[str]:
+        """
+        Mengembalikan hanya worksheet yang visible.
+
+        Hidden/non-visible worksheet tidak menjadi
+        candidate parsing.
+        """
+
+        return [
+            worksheet.name
+            for worksheet in self.get_worksheet_info()
+            if worksheet.is_visible
+        ]
 
     def load_worksheet(
         self,
