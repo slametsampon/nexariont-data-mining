@@ -5,6 +5,13 @@ from dataclasses import dataclass, field
 class MiningConfig:
     worksheet_name: str = "shift-pagi"
 
+    # Visible worksheets yang secara eksplisit bukan
+    # candidate QC data mining.
+    excluded_worksheet_names: tuple[str, ...] = (
+        "CMKS",
+        "QA Rekap",
+        "QA Recap",
+    )
     # Header source
     item_header: str = "Item"
     std_header: str = "STD"

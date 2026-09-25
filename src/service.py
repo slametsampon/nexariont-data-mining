@@ -16,7 +16,7 @@ class WorksheetProcessingResult:
     status:
         SUCCESS  -> parser selesai tanpa exception.
         ERROR    -> parser menghasilkan exception.
-        EXCLUDED -> worksheet tidak diproses karena non-visible.
+        EXCLUDED -> worksheet tidak diproses.
 
     record_count adalah jumlah candidate records
     yang dihasilkan existing parser.
@@ -139,19 +139,24 @@ class QCDataMiningService:
         )
 
         return len(records)
+
     def process_all_worksheets(
         self,
         input_file: Path,
     ) -> MultiWorksheetProcessingResult:
         """
         Memproses seluruh worksheet berdasarkan
-        visibility metadata.
-
-        Visible:
-            diproses menggunakan existing parser.
+        visibility metadata dan configured worksheet
+        exclusion.
 
         Non-visible:
             tidak diparse dan dicatat EXCLUDED.
+
+        Visible tetapi termasuk configured exclusion:
+            tidak diparse dan dicatat EXCLUDED.
+
+        Visible dan tidak termasuk configured exclusion:
+            diproses menggunakan existing parser.
 
         Method ini:
         - tidak menulis output Excel;
@@ -178,9 +183,18 @@ class QCDataMiningService:
             MultiWorksheetProcessingResult()
         )
 
+        excluded_worksheet_names = {
+            name.strip().casefold()
+            for name in self.config.excluded_worksheet_names
+        }
+
         for worksheet_info in (
             reader.get_worksheet_info()
         ):
+
+            # -------------------------------------------------
+            # Source visibility exclusion
+            # -------------------------------------------------
 
             if not worksheet_info.is_visible:
 
@@ -199,6 +213,41 @@ class QCDataMiningService:
                 )
 
                 continue
+
+            # -------------------------------------------------
+            # Configured business exclusion
+            # -------------------------------------------------
+
+            normalized_worksheet_name = (
+                worksheet_info.name
+                .strip()
+                .casefold()
+            )
+
+            if (
+                normalized_worksheet_name
+                in excluded_worksheet_names
+            ):
+
+                processing_result.worksheet_results.append(
+                    WorksheetProcessingResult(
+                        worksheet_name=(
+                            worksheet_info.name
+                        ),
+                        visibility="VISIBLE",
+                        status="EXCLUDED",
+                        record_count=0,
+                        message=(
+                            "Configured worksheet exclusion"
+                        ),
+                    )
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # Candidate worksheet parsing
+            # -------------------------------------------------
 
             try:
                 worksheet = reader.load_worksheet(
