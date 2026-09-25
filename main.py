@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.config import MiningConfig
 from src.service import QCDataMiningService
+from src.exporter import ExcelExporter
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,22 +19,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         required=True,
-        help="Path file XLSX input",
+        help="Path file XLS/XLSX input",
     )
 
     parser.add_argument(
         "--output",
         required=True,
         help="Path file XLSX output",
-    )
-
-    parser.add_argument(
-        "--sheet",
-        default="shift-pagi",
-        help=(
-            "Nama worksheet source "
-            "(default: shift-pagi)"
-        ),
     )
 
     return parser
@@ -51,19 +43,27 @@ def main() -> int:
         args.output
     ).resolve()
 
-    config = MiningConfig(
-        worksheet_name=args.sheet
-    )
+    config = MiningConfig()
 
     service = QCDataMiningService(
         config
     )
 
+    exporter = ExcelExporter(
+        config
+    )
+
     try:
 
-        total_records = service.process_file(
+        result = service.process_all_worksheets(
             input_file=input_file,
+        )
+
+        exporter.export_multi_worksheet(
+            records=result.records,
+            worksheet_results=result.worksheet_results,
             output_file=output_file,
+            source_file=input_file,
         )
 
         print()
@@ -73,13 +73,22 @@ def main() -> int:
             f"Input     : {input_file}"
         )
         print(
-            f"Worksheet : {config.worksheet_name}"
-        )
-        print(
             f"Output    : {output_file}"
         )
         print(
-            f"Records   : {total_records}"
+            f"Records   : {result.total_records}"
+        )
+        print(
+            f"Worksheets: {len(result.worksheet_results)}"
+        )
+        print(
+            f"Success   : {result.success_count}"
+        )
+        print(
+            f"Excluded  : {result.excluded_count}"
+        )
+        print(
+            f"Error     : {result.error_count}"
         )
         print("-" * 50)
 
