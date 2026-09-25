@@ -1,0 +1,10 @@
+@"
+.venv/
+__pycache__/
+*.py[cod]
+output/
+.vscode/
+*.tmp
+~$*
+*.log
+"@ | Set-Content .gitignore
