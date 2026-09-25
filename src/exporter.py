@@ -77,6 +77,7 @@ class ExcelExporter:
     def export_multi_worksheet(
         self,
         records: Sequence[SourcedSamplingRecord],
+        worksheet_results,
         output_file: Path,
         source_file: Path,
     ) -> None:
@@ -87,13 +88,11 @@ class ExcelExporter:
         Source worksheet dipertahankan sebagai provenance
         pada setiap record.
 
-        CP4.3:
+        CP4.4:
         - menulis consolidated Data_Mining;
         - mempertahankan source worksheet;
         - membuat Control minimum multi-worksheet;
-        - belum membuat Processing_Log.
-
-        Processing_Log merupakan scope CP4.4.
+        - membuat Processing_Log dari orchestration result.
 
         Candidate record bukan pernyataan QC validation
         atau approval.
@@ -128,6 +127,11 @@ class ExcelExporter:
             workbook=workbook,
             records=records,
             source_file=source_file,
+        )
+
+        self._write_processing_log(
+            workbook=workbook,
+            worksheet_results=worksheet_results,
         )
 
         workbook.save(
@@ -476,4 +480,73 @@ class ExcelExporter:
         worksheet.column_dimensions[
             "B"
         ].width = 65
-        
+
+    # =====================================================
+    # PROCESSING LOG — CP4.4
+    # =====================================================
+
+    def _write_processing_log(
+        self,
+        workbook,
+        worksheet_results,
+    ) -> None:
+        """
+        Menulis execution trace processing per worksheet.
+
+        Data ditulis dari worksheet_results yang diterima
+        dari orchestration layer. Exporter tidak menentukan
+        ulang visibility, status, atau record count.
+
+        Processing_Log bukan QC validation/approval.
+        """
+
+        worksheet = workbook.create_sheet(
+            "Processing_Log"
+        )
+
+        worksheet.append(
+            [
+                "Worksheet",
+                "Visibility",
+                "Status",
+                "Record Count",
+                "Message",
+            ]
+        )
+
+        for result in worksheet_results:
+            worksheet.append(
+                [
+                    result.worksheet_name,
+                    result.visibility,
+                    result.status,
+                    result.record_count,
+                    result.message,
+                ]
+            )
+
+        self._format_header(
+            worksheet
+        )
+
+        worksheet.freeze_panes = "A2"
+
+        worksheet.auto_filter.ref = (
+            worksheet.dimensions
+        )
+
+        widths = {
+            "A": 28,
+            "B": 14,
+            "C": 14,
+            "D": 16,
+            "E": 50,
+        }
+
+        for column, width in (
+            widths.items()
+        ):
+            worksheet.column_dimensions[
+                column
+            ].width = width
+
