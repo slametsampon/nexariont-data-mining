@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class MiningConfig:
+    sampling_point_master_sheet: str = "QA Review"
     worksheet_name: str = "shift-pagi"
 
     # Visible worksheets yang secara eksplisit bukan

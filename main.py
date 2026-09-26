@@ -5,6 +5,7 @@ from pathlib import Path
 from src.config import MiningConfig
 from src.service import QCDataMiningService
 from src.exporter import ExcelExporter
+from src.sampling_point_master import SamplingPointMaster
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path file XLSX output",
     )
 
+    parser.add_argument(
+        "--master",
+        help="Path NEXARIONT Sampling Point Master XLSX",
+    )
+
+    parser.add_argument(
+        "--domain",
+        help="Domain master SSP, mis. NPG, Octanol, Syngas, Utility, Utility NPG, wwt",
+    )
+
     return parser
 
 
@@ -45,8 +56,20 @@ def main() -> int:
 
     config = MiningConfig()
 
+    if bool(args.master) != bool(args.domain):
+        raise SystemExit("--master dan --domain harus diberikan bersama-sama")
+
+    sampling_point_master = None
+    if args.master:
+        sampling_point_master = SamplingPointMaster.load(
+            Path(args.master).resolve(),
+            worksheet_name=config.sampling_point_master_sheet,
+        )
+
     service = QCDataMiningService(
-        config
+        config,
+        sampling_point_master=sampling_point_master,
+        domain=args.domain,
     )
 
     exporter = ExcelExporter(

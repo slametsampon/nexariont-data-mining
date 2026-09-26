@@ -5,6 +5,7 @@ from typing import Any
 
 from .config import MiningConfig
 from .models import SamplingRecord
+from .sampling_point_master import SamplingPointMaster
 
 
 class ShiftReportParser:
@@ -28,8 +29,15 @@ class ShiftReportParser:
     pada openpyxl maupun xlrd.
     """
 
-    def __init__(self, config: MiningConfig):
+    def __init__(
+        self,
+        config: MiningConfig,
+        sampling_point_master: SamplingPointMaster | None = None,
+        domain: str | None = None,
+    ):
         self.config = config
+        self.sampling_point_master = sampling_point_master
+        self.domain = domain
 
     # ---------------------------------------------------------
     # Public API
@@ -112,9 +120,45 @@ class ShiftReportParser:
                         cell.column
                     )
 
-        return sorted(
+        header_blocks = sorted(
             set(block_columns)
         )
+
+        if header_blocks:
+            return header_blocks
+
+        # -----------------------------------------------------
+        # Headerless worksheet fallback.
+        #
+        # Dipakai hanya bila controlled Master SSP + domain
+        # tersedia. Kolom block ditentukan dari cell source yang
+        # match terhadap Master SSP. Tidak ada fuzzy/pattern
+        # inference dan tidak mengubah path worksheet yang sudah
+        # memiliki header Item.
+        # -----------------------------------------------------
+
+        if (
+            self.sampling_point_master is None
+            or self.domain is None
+        ):
+            return []
+
+        master_block_columns: set[int] = set()
+
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if (
+                    self.sampling_point_master.match(
+                        self.domain,
+                        cell.value,
+                    )
+                    is not None
+                ):
+                    master_block_columns.add(
+                        cell.column
+                    )
+
+        return sorted(master_block_columns)
 
     # ---------------------------------------------------------
     # Date extraction
@@ -354,6 +398,11 @@ class ShiftReportParser:
                     item_col,
                 )
 
+                if self.sampling_point_master is not None and self.domain is not None:
+                    matched_sp = self.sampling_point_master.match(self.domain, sampling_point)
+                    if matched_sp is not None:
+                        sampling_point = matched_sp.sampling_identity
+
                 sampling_times = (
                     self._get_sampling_times(
                         worksheet,
@@ -472,6 +521,11 @@ class ShiftReportParser:
 
         if self._is_total(item):
             return False
+
+        # Controlled master recognition takes precedence when configured.
+        # No fuzzy inference: SamplingPointMaster.match() is conservative.
+        if self.sampling_point_master is not None and self.domain is not None:
+            return self.sampling_point_master.match(self.domain, item) is not None
 
         minimum = self._cell_value(
             worksheet,

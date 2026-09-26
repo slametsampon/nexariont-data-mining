@@ -6,6 +6,7 @@ from .exporter import ExcelExporter
 from .models import SourcedSamplingRecord
 from .parser import ShiftReportParser
 from .workbook_reader import WorkbookReader
+from .sampling_point_master import SamplingPointMaster
 
 
 @dataclass(frozen=True)
@@ -98,11 +99,15 @@ class QCDataMiningService:
     def __init__(
         self,
         config: MiningConfig,
+        sampling_point_master: SamplingPointMaster | None = None,
+        domain: str | None = None,
     ):
         self.config = config
 
         self.parser = ShiftReportParser(
-            config
+            config,
+            sampling_point_master=sampling_point_master,
+            domain=domain,
         )
 
         self.exporter = ExcelExporter(
