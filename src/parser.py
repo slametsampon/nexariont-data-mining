@@ -401,7 +401,11 @@ class ShiftReportParser:
                 if self.sampling_point_master is not None and self.domain is not None:
                     matched_sp = self.sampling_point_master.match(self.domain, sampling_point)
                     if matched_sp is not None:
-                        sampling_point = matched_sp.sampling_identity
+                        sampling_point = self.sampling_point_master.output_identity(
+                            self.domain,
+                            sampling_point,
+                            matched_sp,
+                        )
 
                 sampling_times = (
                     self._get_sampling_times(

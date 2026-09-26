@@ -91,6 +91,32 @@ class SamplingPointMaster:
 
         return None
 
+    def output_identity(
+        self,
+        domain: str,
+        source_text,
+        matched_entry: SamplingPointMasterEntry,
+    ) -> str:
+        """Return output identity without collapsing an ambiguous primary B.
+
+        A unique primary B keeps the existing normalized Master identity.
+        When the same B exists more than once in the domain, a successful B+C
+        match keeps the exact source identity so distinct Sampling Points remain
+        distinct without inventing a new canonical B+C representation.
+        """
+        candidates = self._by_domain.get(self._norm(domain), [])
+        primary_key = self._norm(matched_entry.sampling_identity)
+        same_primary = [
+            entry
+            for entry in candidates
+            if self._norm(entry.sampling_identity) == primary_key
+        ]
+
+        if len(same_primary) > 1:
+            return str(source_text).strip()
+
+        return matched_entry.sampling_identity
+
     @staticmethod
     def _norm(value) -> str:
         if value is None:
