@@ -2,10 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from src.config import MiningConfig
-from src.service import QCDataMiningService
-from src.exporter import ExcelExporter
-from src.sampling_point_master import SamplingPointMaster
+from src.workbook_processor import QCWorkbookProcessor
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,39 +51,26 @@ def main() -> int:
         args.output
     ).resolve()
 
-    config = MiningConfig()
-
     if bool(args.master) != bool(args.domain):
-        raise SystemExit("--master dan --domain harus diberikan bersama-sama")
-
-    sampling_point_master = None
-    if args.master:
-        sampling_point_master = SamplingPointMaster.load(
-            Path(args.master).resolve(),
-            worksheet_name=config.sampling_point_master_sheet,
+        raise SystemExit(
+            "--master dan --domain harus diberikan bersama-sama"
         )
 
-    service = QCDataMiningService(
-        config,
-        sampling_point_master=sampling_point_master,
-        domain=args.domain,
+    master_file = (
+        Path(args.master).resolve()
+        if args.master
+        else None
     )
 
-    exporter = ExcelExporter(
-        config
-    )
+    processor = QCWorkbookProcessor()
 
     try:
 
-        result = service.process_all_worksheets(
+        result = processor.process(
             input_file=input_file,
-        )
-
-        exporter.export_multi_worksheet(
-            records=result.records,
-            worksheet_results=result.worksheet_results,
             output_file=output_file,
-            source_file=input_file,
+            master_file=master_file,
+            domain=args.domain,
         )
 
         print()
