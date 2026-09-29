@@ -122,6 +122,7 @@ def main() -> int:
             output_dir=output_dir,
             master=master,
             final_output=final_output,
+            progress=print,
         )
     except NoWeekFoldersFoundError as exc:
         raise SystemExit(str(exc)) from None

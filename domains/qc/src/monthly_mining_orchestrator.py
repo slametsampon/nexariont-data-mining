@@ -4,6 +4,7 @@ import tempfile
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from openpyxl import Workbook, load_workbook
 
@@ -14,6 +15,8 @@ from .workbook_processor import QCWorkbookProcessor
 
 MASTER_SOURCE_SHEET = "Sampling-Point"
 CORE_MASTER_SHEET = "QA Review"
+
+ProgressCallback = Callable[[str], None]
 
 
 class NoWeekFoldersFoundError(ValueError):
@@ -48,6 +51,7 @@ class MonthlyMiningOrchestrator:
         output_dir: Path,
         master: Path,
         final_output: Path,
+        progress: ProgressCallback | None = None,
     ) -> MonthlyRunResult:
         input_root = Path(input_root)
         output_dir = Path(output_dir)
@@ -62,6 +66,7 @@ class MonthlyMiningOrchestrator:
 
         consolidator = MonthlyWorkbookConsolidator()
         source_counter = 0
+        current_week: str | None = None
 
         with tempfile.TemporaryDirectory(prefix="nexariont_qc_monthly_") as tmp:
             tmp_dir = Path(tmp)
@@ -71,13 +76,41 @@ class MonthlyMiningOrchestrator:
             )
 
             for domain_plan in plan.domain_plans:
+                if domain_plan.week != current_week:
+                    current_week = domain_plan.week
+                    self._emit(progress, f"\n=== {current_week} ===")
+
                 if domain_plan.condition is not None:
-                    consolidator.record_discovery_condition(domain_plan.condition)
+                    if domain_plan.condition.status == "MISSING_DOMAIN_FOLDER":
+                        self._emit(
+                            progress,
+                            f"[MISSING] {domain_plan.folder_name}",
+                        )
+                    elif domain_plan.condition.status == "NO_WORKBOOKS":
+                        self._emit(
+                            progress,
+                            f"[EMPTY]   {domain_plan.folder_name}",
+                        )
+
+                    consolidator.record_discovery_condition(
+                        domain_plan.condition
+                    )
                     continue
+
+                self._emit(
+                    progress,
+                    f"[{domain_plan.folder_name}] "
+                    f"{len(domain_plan.work_items)} workbook(s)",
+                )
 
                 for item in domain_plan.work_items:
                     source_counter += 1
                     temp_output = tmp_dir / f"{source_counter:04d}.xlsx"
+
+                    self._emit(
+                        progress,
+                        f"  {item.source_workbook}",
+                    )
 
                     try:
                         self.processor.process(
@@ -116,6 +149,14 @@ class MonthlyMiningOrchestrator:
             weeks_detected=len(plan.weeks),
             totals=totals,
         )
+
+    @staticmethod
+    def _emit(
+        progress: ProgressCallback | None,
+        message: str,
+    ) -> None:
+        if progress is not None:
+            progress(message)
 
     @staticmethod
     def _build_core_master_adapter(
