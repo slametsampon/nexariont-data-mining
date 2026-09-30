@@ -1,15 +1,3 @@
-from __future__ import annotations
-
-import argparse
-import re
-from pathlib import Path
-
-from src.monthly_mining_orchestrator import (
-    MASTER_SOURCE_SHEET,
-    MonthlyMiningOrchestrator,
-    NoWeekFoldersFoundError,
-)
-
 """CLI entry point untuk monthly QC Data Mining NEXARIONT.
 
 Module ini menangani command-line interface untuk pemrosesan satu monthly source
@@ -26,6 +14,19 @@ Responsibility module dibatasi pada:
 Week/domain/workbook discovery, workbook processing, dan monthly consolidation
 ditangani oleh application components di bawah MonthlyMiningOrchestrator.
 """
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+from src.monthly_mining_orchestrator import (
+    MASTER_SOURCE_SHEET,
+    MonthlyMiningOrchestrator,
+    NoWeekFoldersFoundError,
+)
+
 
 MASTER_BASENAME = "Master-Data.xlsx"
 

@@ -1,9 +1,3 @@
-import argparse
-import sys
-from pathlib import Path
-
-from src.workbook_processor import QCWorkbookProcessor
-
 """CLI entry point untuk pemrosesan satu workbook QC NEXARIONT.
 
 Module ini menangani parsing command-line argument, validasi pasangan master/domain,
@@ -19,6 +13,12 @@ CLI:
     --master    Optional Sampling Point Master.
     --domain    Optional domain master; wajib diberikan bersama --master.
 """
+
+import argparse
+import sys
+from pathlib import Path
+
+from src.workbook_processor import QCWorkbookProcessor
 
 def build_parser() -> argparse.ArgumentParser:
     """Membuat command-line parser untuk single-workbook QC mining.
@@ -79,7 +79,6 @@ def main() -> int:
         SystemExit: Jika hanya salah satu dari --master atau --domain diberikan.
             argparse juga dapat menghasilkan SystemExit untuk invalid CLI usage.
     """
-    
     args = build_parser().parse_args()
 
     input_file = Path(
