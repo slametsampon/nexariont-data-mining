@@ -20,11 +20,39 @@ ProgressCallback = Callable[[str], None]
 
 
 class NoWeekFoldersFoundError(ValueError):
+    """Menandakan tidak ada folder minggu dalam rencana pemrosesan bulanan.
+
+    Subclass ValueError yang dilempar MonthlyMiningOrchestrator.run() sebelum
+    pemrosesan master dan workbook dimulai.
+
+    Args:
+        *args: Argumen exception bawaan; biasanya pesan berisi folder input.
+    """
+
     pass
 
 
 @dataclass(frozen=True)
 class MonthlyRunResult:
+    """Ringkasan keluaran satu proses mining QC bulanan.
+
+    Seluruh atribut merupakan argumen konstruktor dataclass frozen. totals
+    tetap merupakan Counter mutable meskipun atribut dataclass bersifat frozen.
+
+    Attributes:
+        input_root (Path): Folder bulan sumber.
+        output_dir (Path): Direktori keluaran yang diberikan pemanggil;
+            disimpan sebagai metadata, bukan penentu lokasi final_output.
+        master (Path): Path workbook master asli.
+        final_output (Path): Path workbook konsolidasi yang telah disimpan.
+        month (str): Nama folder bulan dari rencana.
+        weeks_detected (int): Jumlah folder minggu yang ditemukan.
+        totals (Counter): Hitungan candidate_records, worksheets, success,
+            excluded, error, workbooks_attempted, exec_failed,
+            output_read_error, missing_domain_folder, dan no_workbooks.
+            Key yang tidak tercatat memiliki nilai baca 0.
+    """
+
     input_root: Path
     output_dir: Path
     master: Path
@@ -35,7 +63,33 @@ class MonthlyRunResult:
 
 
 class MonthlyMiningOrchestrator:
-    """Coordinate the monthly QC mining application flow."""
+    """Mengatur penemuan sumber, pemrosesan, dan konsolidasi QC bulanan.
+
+    Worksheet master "Sampling-Point" disalin nilainya ke adapter sementara
+    "QA Review". Setiap workbook diproses melalui QCWorkbookProcessor, lalu
+    hasilnya digabungkan dengan informasi asal bulan, minggu, domain, dan file.
+    Kegagalan pemrosesan workbook dicatat agar workbook berikutnya tetap diproses.
+
+    Args:
+        planner (MonthlySourcePlanner | None): Penyusun rencana sumber;
+            default instance MonthlySourcePlanner.
+        processor (QCWorkbookProcessor | None): Pemroses workbook;
+            default instance QCWorkbookProcessor.
+
+    Attributes:
+        planner (MonthlySourcePlanner): Penyusun rencana yang digunakan.
+        processor (QCWorkbookProcessor): Pemroses workbook yang digunakan.
+
+    Examples:
+        orchestrator = MonthlyMiningOrchestrator()
+        result = orchestrator.run(
+            input_root=Path("input/September 2026"),
+            output_dir=Path("output"),
+            master=Path("_Master-Data.xlsx"),
+            final_output=Path("output/hasil_bulanan.xlsx"),
+            progress=print,
+        )
+    """
 
     def __init__(
         self,
@@ -53,6 +107,27 @@ class MonthlyMiningOrchestrator:
         final_output: Path,
         progress: ProgressCallback | None = None,
     ) -> MonthlyRunResult:
+        """Menjalankan rencana bulanan dan menyimpan workbook konsolidasi.
+
+        Args:
+            input_root (Path): Folder bulan berisi folder minggu.
+            output_dir (Path): Metadata direktori keluaran untuk hasil eksekusi.
+            master (Path): Workbook master dengan worksheet "Sampling-Point".
+            final_output (Path): Lokasi hasil; direktori induk harus sudah tersedia.
+                File yang sudah ada akan diganti oleh consolidator.
+            progress (Callable[[str], None] | None): Callback pesan kemajuan;
+                default None. Exception callback diteruskan kepada pemanggil.
+
+        Returns:
+            MonthlyRunResult: Lokasi hasil, jumlah minggu, dan hitungan pemrosesan.
+
+        Raises:
+            NoWeekFoldersFoundError: Tidak ditemukan folder minggu.
+            FileNotFoundError: Folder input atau workbook master tidak tersedia.
+            ValueError: Worksheet "Sampling-Point" tidak ditemukan pada master.
+            OSError: Kegagalan akses berkas yang tidak ditangani per workbook.
+        """
+
         input_root = Path(input_root)
         output_dir = Path(output_dir)
         master = Path(master)

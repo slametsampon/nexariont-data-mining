@@ -8,6 +8,18 @@ from openpyxl import load_workbook
 
 @dataclass(frozen=True)
 class SamplingPointMasterEntry:
+    """Satu entri referensi titik sampling dari worksheet master.
+
+    Dataclass frozen ini merekam tiga kolom pertama master dan nomor baris
+    asalnya. Semua atribut merupakan argumen konstruktor.
+
+    Attributes:
+        domain (str): Domain proses dari kolom A.
+        sampling_identity (str): Identitas utama titik sampling dari kolom B.
+        description (str | None): Keterangan kolom C, atau None jika kosong.
+        row_number (int): Nomor baris Excel sumber, dimulai dari 1.
+    """
+
     domain: str
     sampling_identity: str
     description: Optional[str]
@@ -15,11 +27,23 @@ class SamplingPointMasterEntry:
 
 
 class SamplingPointMaster:
-    """Controlled Sampling Point recognition reference.
+    """Referensi terkontrol untuk pengenalan identitas titik sampling.
 
-    Matching is deliberately conservative: exact normalized B, exact normalized
-    B+C representation, or an explicitly supported '(HH.MM)' suffix where the
-    stripped base itself exists in the master. No fuzzy/pattern inference.
+    Pencocokan dibatasi pada identitas kolom B yang dinormalisasi, kombinasi
+    B+C yang didukung, atau identitas dengan akhiran waktu (HH.MM)/(HH:MM).
+    Normalisasi mengabaikan kapitalisasi dan karakter selain a-z serta 0-9.
+    Hasil ambigu dikembalikan sebagai None; tidak dilakukan pencocokan fuzzy.
+
+    Args:
+        entries (list[SamplingPointMasterEntry]): Entri yang diindeks per domain.
+
+    Attributes:
+        entries (list[SamplingPointMasterEntry]): Daftar entri yang diberikan.
+            Hindari mutasi setelah konstruksi karena indeks domain dibangun sekali.
+
+    Examples:
+        master = SamplingPointMaster.load(Path("master.xlsx"))
+        entry = master.match("NPG", "SP-01")
     """
 
     def __init__(self, entries: list[SamplingPointMasterEntry]):
@@ -30,6 +54,21 @@ class SamplingPointMaster:
 
     @classmethod
     def load(cls, path: Path, worksheet_name: str = "QA Review") -> "SamplingPointMaster":
+        """Membaca entri master dari tiga kolom pertama, mulai baris kedua.
+
+        Args:
+            path (Path): Lokasi workbook master yang didukung openpyxl.
+            worksheet_name (str): Nama worksheet master; default "QA Review".
+
+        Returns:
+            SamplingPointMaster: Referensi dengan indeks domain. Baris tanpa domain
+            atau identitas dilewati; deskripsi kosong atau "(blank)" menjadi None.
+
+        Raises:
+            FileNotFoundError: File master tidak ditemukan.
+            ValueError: Worksheet master tidak ditemukan.
+        """
+
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Master SSP tidak ditemukan: {path}")
@@ -50,6 +89,17 @@ class SamplingPointMaster:
             wb.close()
 
     def match(self, domain: str, source_text) -> Optional[SamplingPointMasterEntry]:
+        """Mencari satu entri unik dalam domain berdasarkan teks sumber.
+
+        Args:
+            domain (str): Domain yang membatasi kandidat pencocokan.
+            source_text (Any): Nilai sel berisi identitas titik sampling.
+
+        Returns:
+            SamplingPointMasterEntry | None: Entri unik, atau None jika teks kosong,
+            tidak cocok, atau ambigu.
+        """
+
         if self._blank(source_text):
             return None
         candidates = self._by_domain.get(self._norm(domain), [])

@@ -11,18 +11,19 @@ from .sampling_point_master import SamplingPointMaster
 
 @dataclass(frozen=True)
 class WorksheetProcessingResult:
-    """
-    Hasil processing untuk satu worksheet.
+    """Ringkasan pemrosesan satu worksheet, termasuk worksheet yang dilewati.
 
-    status:
-        SUCCESS  -> parser selesai tanpa exception.
-        ERROR    -> parser menghasilkan exception.
-        EXCLUDED -> worksheet tidak diproses.
+    Status SUCCESS berarti parser selesai tanpa exception, bukan persetujuan
+    atau validasi QC. Semua atribut merupakan argumen konstruktor dataclass
+    frozen; message memiliki nilai bawaan string kosong.
 
-    record_count adalah jumlah candidate records
-    yang dihasilkan existing parser.
-
-    SUCCESS tidak berarti QC validation/approval.
+    Attributes:
+        worksheet_name (str): Nama worksheet sumber.
+        visibility (str): "VISIBLE" atau "HIDDEN"; HIDDEN mencakup seluruh
+            worksheet yang dinilai tidak visible.
+        status (str): "SUCCESS", "ERROR", atau "EXCLUDED".
+        record_count (int): Jumlah candidate record; 0 jika error atau excluded.
+        message (str): Keterangan error atau alasan pengecualian.
     """
 
     worksheet_name: str
@@ -34,16 +35,24 @@ class WorksheetProcessingResult:
 
 @dataclass
 class MultiWorksheetProcessingResult:
-    """
-    Aggregate result dari multi-worksheet processing.
+    """Kumpulan record dan ringkasan pemrosesan seluruh worksheet.
 
-    records:
-        Candidate records dengan source worksheet
-        yang dipertahankan melalui SourcedSamplingRecord.
+    Kedua daftar dapat diberikan pada konstruktor dataclass. Jika tidak
+    diberikan, setiap instance mendapatkan daftar kosongnya sendiri.
 
-    worksheet_results:
-        Processing result untuk setiap worksheet,
-        termasuk worksheet yang excluded.
+    Attributes:
+        records (list[SourcedSamplingRecord]): Candidate record beserta sumbernya.
+        worksheet_results (list[WorksheetProcessingResult]): Hasil setiap
+            worksheet, termasuk yang gagal atau dikecualikan.
+        total_records (int): Properti jumlah record pada records.
+        success_count (int): Properti jumlah worksheet berstatus SUCCESS.
+        error_count (int): Properti jumlah worksheet berstatus ERROR.
+        excluded_count (int): Properti jumlah worksheet berstatus EXCLUDED.
+
+    Examples:
+        >>> result = MultiWorksheetProcessingResult()
+        >>> (result.total_records, result.error_count)
+        (0, 0)
     """
 
     records: list[SourcedSamplingRecord] = field(
@@ -86,14 +95,26 @@ class MultiWorksheetProcessingResult:
 
 
 class QCDataMiningService:
-    """
-    Application service / orchestration layer.
+    """Mengatur pembacaan dan parsing data QC pada tingkat worksheet.
 
-    Existing single-worksheet process_file() dipertahankan.
+    process_file() memproses satu worksheet terkonfigurasi dan mengekspor hasil.
+    process_all_worksheets() mengembalikan hasil gabungan untuk diekspor oleh
+    pemanggil, dengan penyaringan worksheet dan isolasi error per worksheet.
 
-    Multi-worksheet capability tersedia melalui
-    process_all_worksheets() dan belum menjadi
-    production export path pada CP4.2.
+    Args:
+        config (MiningConfig): Aturan parser, pengecualian worksheet, dan ekspor.
+        sampling_point_master (SamplingPointMaster | None): Referensi titik
+            sampling opsional; default None.
+        domain (str | None): Domain untuk pencocokan master; default None.
+
+    Attributes:
+        config (MiningConfig): Konfigurasi yang digunakan.
+        parser (ShiftReportParser): Parser yang digunakan ulang antar-worksheet.
+        exporter (ExcelExporter): Penulis hasil mode satu worksheet.
+
+    Examples:
+        service = QCDataMiningService(MiningConfig())
+        result = service.process_all_worksheets(Path("laporan.xlsx"))
     """
 
     def __init__(
@@ -119,10 +140,19 @@ class QCDataMiningService:
         input_file: Path,
         output_file: Path,
     ) -> int:
-        """
-        Existing single-worksheet production path.
+        """Memproses worksheet terkonfigurasi dan menyimpan hasil ke Excel.
 
-        Dipertahankan pada CP4.2 untuk regression safety.
+        Args:
+            input_file (Path): Workbook sumber .xls atau .xlsx.
+            output_file (Path): Lokasi workbook .xlsx hasil.
+
+        Returns:
+            int: Jumlah candidate record yang diekspor.
+
+        Raises:
+            FileNotFoundError: Workbook sumber tidak ditemukan.
+            ValueError: Format atau worksheet tidak sesuai, atau parser gagal
+                menemukan blok data maupun tanggal sampling.
         """
 
         reader = WorkbookReader(

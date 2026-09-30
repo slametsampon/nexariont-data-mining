@@ -28,6 +28,21 @@ def _norm_name(value: str) -> str:
 
 @dataclass(frozen=True)
 class MonthlyWorkItem:
+    """Satu workbook sumber yang dijadwalkan untuk pemrosesan bulanan.
+
+    Seluruh atribut tersimpan merupakan argumen konstruktor dataclass frozen.
+
+    Attributes:
+        month (str): Nama folder bulan sumber.
+        week (str): Nama folder minggu sumber.
+        folder_name (str): Nama folder domain menurut konfigurasi routing.
+        domain (str): Nama domain yang diteruskan ke parser.
+        source_workbook (str): Nama file workbook sumber.
+        source_path (Path): Path workbook sumber.
+        provenance (tuple[str, str, str, str]): Properti asal data dalam urutan
+            month, week, domain, source_workbook.
+    """
+
     month: str
     week: str
     folder_name: str
@@ -47,6 +62,20 @@ class MonthlyWorkItem:
 
 @dataclass(frozen=True)
 class MonthlyDiscoveryCondition:
+    """Kondisi penemuan sumber yang membuat domain tidak memiliki work item.
+
+    Seluruh atribut merupakan argumen konstruktor dataclass frozen.
+
+    Attributes:
+        month (str): Nama folder bulan.
+        week (str): Nama folder minggu.
+        folder_name (str): Nama folder domain yang dicari.
+        domain (str): Nama domain untuk parser.
+        source_path (Path | None): Path folder domain, atau None jika tidak ada.
+        status (str): "MISSING_DOMAIN_FOLDER" atau "NO_WORKBOOKS".
+        message (str): Penjelasan kondisi untuk ringkasan eksekusi.
+    """
+
     month: str
     week: str
     folder_name: str
@@ -58,6 +87,22 @@ class MonthlyDiscoveryCondition:
 
 @dataclass(frozen=True)
 class MonthlyDomainPlan:
+    """Rencana pemrosesan satu domain pada satu minggu.
+
+    Seluruh atribut merupakan argumen konstruktor dataclass frozen.
+
+    Attributes:
+        month (str): Nama folder bulan.
+        week (str): Nama folder minggu.
+        folder_name (str): Nama folder domain menurut routing.
+        domain (str): Nama domain untuk parser.
+        domain_dir (Path | None): Folder domain yang ditemukan, atau None.
+        work_items (tuple[MonthlyWorkItem, ...]): Workbook yang dijadwalkan;
+            kosong jika folder tidak tersedia atau tidak berisi workbook.
+        condition (MonthlyDiscoveryCondition | None): Kondisi sumber tanpa
+            work item; default None bila workbook tersedia.
+    """
+
     month: str
     week: str
     folder_name: str
@@ -69,6 +114,21 @@ class MonthlyDomainPlan:
 
 @dataclass(frozen=True)
 class MonthlyPlan:
+    """Rencana penemuan sumber untuk satu folder bulan.
+
+    Planner menyusun domain_plans menurut urutan minggu dan routing domain.
+    Atribut tersimpan menjadi argumen konstruktor dataclass frozen.
+
+    Attributes:
+        month (str): Nama folder bulan sumber.
+        weeks (tuple[Path, ...]): Folder minggu yang ditemukan dan diurutkan.
+        domain_plans (tuple[MonthlyDomainPlan, ...]): Rencana setiap minggu/domain.
+        work_items (tuple[MonthlyWorkItem, ...]): Properti gabungan work item
+            dari seluruh domain, mengikuti urutan rencana.
+        discovery_conditions (tuple[MonthlyDiscoveryCondition, ...]): Properti
+            gabungan kondisi sumber yang perlu dicatat dalam ringkasan.
+    """
+
     month: str
     weeks: tuple[Path, ...]
     domain_plans: tuple[MonthlyDomainPlan, ...]
@@ -91,12 +151,44 @@ class MonthlyPlan:
 
 
 class MonthlySourcePlanner:
-    """Translate one monthly source folder into a deterministic work plan."""
+    """Menyusun rencana workbook dari struktur folder bulan/minggu/domain.
+
+    Folder minggu memiliki awalan "minggu " tanpa membedakan kapitalisasi.
+    Workbook .xls/.xlsx dicari secara rekursif di folder domain, mengabaikan
+    file sementara berawalan "~$". Urutan mengikuti minggu, routing domain,
+    dan path relatif workbook yang dinormalisasi.
+
+    Args:
+        domain_routing (Iterable[tuple[str, str]]): Pasangan nama folder dan
+            domain parser; default DOMAIN_ROUTING untuk NPG, Octanol, Syn Gas,
+            Utility, dan WWT.
+
+    Attributes:
+        domain_routing (tuple[tuple[str, str], ...]): Routing yang digunakan.
+
+    Examples:
+        planner = MonthlySourcePlanner()
+        plan = planner.plan(Path("input/September 2026"))
+    """
 
     def __init__(self, domain_routing=DOMAIN_ROUTING):
         self.domain_routing = tuple(domain_routing)
 
     def plan(self, input_root: Path) -> MonthlyPlan:
+        """Menemukan folder minggu dan workbook untuk setiap domain.
+
+        Args:
+            input_root (Path): Folder bulan yang berisi folder minggu.
+
+        Returns:
+            MonthlyPlan: Rencana beserta kondisi folder domain yang hilang/kosong.
+            Jika tidak ada folder minggu, weeks dan domain_plans berupa tuple kosong.
+
+        Raises:
+            FileNotFoundError: Folder input tidak ditemukan.
+            NotADirectoryError: input_root bukan direktori.
+        """
+
         input_root = Path(input_root)
         weeks = tuple(self._find_week_dirs(input_root))
         domain_plans: list[MonthlyDomainPlan] = []

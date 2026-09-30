@@ -17,6 +17,27 @@ from .models import (
 
 
 class ExcelExporter:
+    """Menulis candidate record QC ke workbook .xlsx beserta informasi kontrol.
+
+    export() menulis delapan kolom data dan worksheet kontrol.
+    export_multi_worksheet() menambahkan kolom Source Worksheet serta
+    Processing_Log. Kedua metode membuat direktori induk bila diperlukan
+    dan menyimpan workbook pada output_file, mengganti file yang sudah ada.
+
+    Args:
+        config (MiningConfig): Nama worksheet, header, dan konfigurasi keluaran.
+
+    Attributes:
+        config (MiningConfig): Konfigurasi ekspor yang digunakan.
+
+    Examples:
+        exporter = ExcelExporter(MiningConfig())
+        exporter.export(
+            records=[], output_file=Path("hasil.xlsx"),
+            source_file=Path("laporan.xls"),
+        )
+    """
+
     def __init__(
         self,
         config: MiningConfig,
@@ -33,10 +54,15 @@ class ExcelExporter:
         output_file: Path,
         source_file: Path,
     ) -> None:
-        """
-        Existing single-worksheet export path.
+        """Menyimpan record mode satu worksheet dan informasi kontrol.
 
-        Dipertahankan untuk regression compatibility.
+        Args:
+            records (Sequence[SamplingRecord]): Record yang akan diekspor.
+            output_file (Path): Lokasi file .xlsx tujuan.
+            source_file (Path): Path sumber untuk informasi penelusuran.
+
+        Returns:
+            None: Workbook disimpan ke output_file.
         """
 
         output_file = Path(
@@ -81,21 +107,20 @@ class ExcelExporter:
         output_file: Path,
         source_file: Path,
     ) -> None:
-        """
-        Export consolidated candidate records dari
-        multi-worksheet processing.
+        """Menyimpan data gabungan, kontrol, dan log pemrosesan worksheet.
 
-        Source worksheet dipertahankan sebagai provenance
-        pada setiap record.
+        Candidate record merupakan hasil ekstraksi, bukan pernyataan validasi
+        atau persetujuan QC. Nama worksheet asal disimpan pada setiap record.
 
-        CP4.4:
-        - menulis consolidated Data_Mining;
-        - mempertahankan source worksheet;
-        - membuat Control minimum multi-worksheet;
-        - membuat Processing_Log dari orchestration result.
+        Args:
+            records (Sequence[SourcedSamplingRecord]): Record beserta worksheet asal.
+            worksheet_results (Iterable[WorksheetProcessingResult]): Ringkasan
+                pemrosesan untuk ditulis pada Processing_Log.
+            output_file (Path): Lokasi file .xlsx tujuan.
+            source_file (Path): Path workbook sumber untuk informasi kontrol.
 
-        Candidate record bukan pernyataan QC validation
-        atau approval.
+        Returns:
+            None: Workbook disimpan ke output_file.
         """
 
         output_file = Path(

@@ -4,8 +4,33 @@ from pathlib import Path
 
 from src.workbook_processor import QCWorkbookProcessor
 
+"""CLI entry point untuk pemrosesan satu workbook QC NEXARIONT.
+
+Module ini menangani parsing command-line argument, validasi pasangan master/domain,
+pemanggilan QCWorkbookProcessor, serta presentation hasil dan exit status.
+
+Actual workbook processing tidak diimplementasikan di module ini. Pemrosesan
+didelegasikan ke QCWorkbookProcessor agar CLI tetap thin dan terpisah dari
+application/core logic.
+
+CLI:
+    --input     Workbook .xls/.xlsx sumber.
+    --output    Workbook .xlsx hasil.
+    --master    Optional Sampling Point Master.
+    --domain    Optional domain master; wajib diberikan bersama --master.
+"""
 
 def build_parser() -> argparse.ArgumentParser:
+    """Membuat command-line parser untuk single-workbook QC mining.
+
+    Parser menyediakan input/output wajib serta pasangan master/domain opsional.
+    Method ini hanya mendefinisikan CLI contract dan tidak melakukan file access
+    maupun workbook processing.
+
+    Returns:
+        argparse.ArgumentParser: Parser dengan argument --input, --output,
+        --master, dan --domain.
+    """
 
     parser = argparse.ArgumentParser(
         description=(
@@ -40,7 +65,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Menjalankan single-workbook QC mining dari command line.
 
+    Argument CLI dikonversi menjadi absolute Path. --master dan --domain harus
+    diberikan bersama-sama. Pemrosesan workbook kemudian didelegasikan ke
+    QCWorkbookProcessor dan hasil execution ditampilkan ke terminal.
+
+    Returns:
+        int: 0 jika processing selesai tanpa unhandled exception; 1 jika
+        QCWorkbookProcessor atau dependency processing menghasilkan exception.
+
+    Raises:
+        SystemExit: Jika hanya salah satu dari --master atau --domain diberikan.
+            argparse juga dapat menghasilkan SystemExit untuk invalid CLI usage.
+    """
+    
     args = build_parser().parse_args()
 
     input_file = Path(

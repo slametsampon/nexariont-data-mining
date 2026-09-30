@@ -10,9 +10,24 @@ from .service import (
 
 
 class QCWorkbookProcessor:
-    """
-    Shared application entry point untuk memproses
-    satu QC workbook end-to-end.
+    """Menjalankan ekstraksi dan ekspor seluruh worksheet satu workbook QC.
+
+    Digunakan bersama oleh alur CLI dan orkestrasi bulanan. process() memuat
+    master opsional, menjalankan service multi-worksheet, lalu menulis data,
+    kontrol, dan log pemrosesan ke workbook tujuan.
+
+    Args:
+        config (MiningConfig | None): Konfigurasi pemrosesan; jika None,
+            menggunakan MiningConfig().
+
+    Attributes:
+        config (MiningConfig): Konfigurasi efektif untuk service dan exporter.
+
+    Examples:
+        processor = QCWorkbookProcessor()
+        result = processor.process(
+            input_file=Path("laporan.xlsx"), output_file=Path("hasil.xlsx")
+        )
     """
 
     def __init__(
@@ -28,6 +43,25 @@ class QCWorkbookProcessor:
         master_file: Path | None = None,
         domain: str | None = None,
     ) -> MultiWorksheetProcessingResult:
+
+        """Memproses workbook sumber dan mengekspor hasil multi-worksheet.
+
+        Args:
+            input_file (Path): Workbook .xls atau .xlsx sumber.
+            output_file (Path): Lokasi workbook .xlsx hasil.
+            master_file (Path | None): Workbook master opsional; default None.
+            domain (str | None): Domain master; wajib diberikan bersama master_file.
+
+        Returns:
+            MultiWorksheetProcessingResult: Record dan status setiap worksheet.
+            Kegagalan parsing per worksheet dicatat di hasil dan tidak menghentikan
+            pemrosesan worksheet berikutnya.
+
+        Raises:
+            ValueError: Hanya salah satu dari master_file/domain diberikan, format
+                sumber tidak didukung, atau worksheet master tidak ditemukan.
+            FileNotFoundError: Workbook sumber atau master tidak ditemukan.
+        """
 
         input_file = Path(input_file).resolve()
         output_file = Path(output_file).resolve()

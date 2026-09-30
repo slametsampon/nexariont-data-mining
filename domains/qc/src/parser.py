@@ -9,24 +9,29 @@ from .sampling_point_master import SamplingPointMaster
 
 
 class ShiftReportParser:
-    """
-    Parser QC Shift Report.
+    """Mengubah blok laporan shift QC menjadi record pengukuran terstruktur.
 
-    Responsibility:
-    - menemukan horizontal data blocks
-    - membaca Sampling Date
-    - mendeteksi Sampling Point
-    - membaca Parameter
-    - menghubungkan Parameter dengan Sampling Time
-    - menghasilkan normalized SamplingRecord
+    Parser menemukan blok horizontal, membaca tanggal, mengenali titik
+    sampling, dan mengaitkan parameter dengan waktu sampling. Worksheet cukup
+    menyediakan cell(), iter_rows(), max_row, dan max_column; pembukaan serta
+    penulisan file dilakukan oleh komponen lain.
 
-    Parser tidak bertanggung jawab:
-    - membuka file Excel
-    - menentukan reader .xls / .xlsx
-    - menulis file output
+    Args:
+        config (MiningConfig): Label header dan aturan pembacaan data.
+        sampling_point_master (SamplingPointMaster | None): Referensi identitas
+            terkontrol; default None. Bersama domain, memungkinkan pencarian
+            blok tanpa header Item.
+        domain (str | None): Domain pencocokan master; default None.
 
-    Dengan demikian parser tidak bergantung langsung
-    pada openpyxl maupun xlrd.
+    Attributes:
+        config (MiningConfig): Konfigurasi parser.
+        sampling_point_master (SamplingPointMaster | None): Referensi opsional.
+        domain (str | None): Domain sumber untuk pencocokan identitas.
+
+    Examples:
+        reader = WorkbookReader(Path("laporan.xlsx"))
+        parser = ShiftReportParser(MiningConfig())
+        records = parser.parse(reader.load_worksheet("shift-pagi"))
     """
 
     def __init__(
@@ -47,6 +52,20 @@ class ShiftReportParser:
         self,
         worksheet,
     ) -> list[SamplingRecord]:
+
+        """Membaca seluruh blok data dalam satu worksheet.
+
+        Args:
+            worksheet: Worksheet openpyxl atau adapter dengan antarmuka sel
+                dan iterasi baris yang digunakan parser.
+
+        Returns:
+            list[SamplingRecord]: Candidate record dari seluruh blok yang ditemukan.
+
+        Raises:
+            ValueError: Blok data tidak ditemukan, tanggal sampling tidak tersedia,
+                atau teks tanggal tidak dapat dikonversi menjadi tanggal yang valid.
+        """
 
         block_columns = self._find_data_blocks(
             worksheet

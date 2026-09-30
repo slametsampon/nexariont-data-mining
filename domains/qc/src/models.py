@@ -5,11 +5,28 @@ from typing import Any
 
 @dataclass
 class SamplingRecord:
-    """
-    Normalized QC sampling record.
+    """Satu hasil pengukuran QC dalam format delapan kolom.
 
-    Model ini mempertahankan contract existing parser
-    dan existing exporter.
+    Semua atribut merupakan argumen konstruktor dataclass. Nilai pengukuran
+    dan batas standar mempertahankan tipe hasil parser, termasuk teks khusus.
+
+    Attributes:
+        sampling_date (date): Tanggal pengambilan sampel.
+        sampling_time (str): Waktu sampling yang telah diformat parser.
+        sampling_point (str): Identitas titik sampling.
+        parameter (str): Nama parameter pengujian.
+        unit (Any): Satuan pengukuran.
+        minimum (Any): Batas minimum standar.
+        maximum (Any): Batas maksimum standar.
+        value (Any): Nilai hasil pengukuran.
+
+    Examples:
+        >>> from datetime import date
+        >>> record = SamplingRecord(
+        ...     date(2026, 9, 22), "08:00", "SP-01", "pH", "-", 6, 9, 7.2
+        ... )
+        >>> record.to_row()[-1]
+        7.2
     """
 
     sampling_date: date
@@ -22,8 +39,11 @@ class SamplingRecord:
     value: Any
 
     def to_row(self) -> list:
-        """
-        Existing eight-column QC output representation.
+        """Mengubah record menjadi delapan nilai sesuai urutan header ekspor.
+
+        Returns:
+            list: Tanggal, waktu, titik sampling, parameter, satuan, minimum,
+            maksimum, dan nilai pengukuran.
         """
 
         return [
@@ -40,28 +60,32 @@ class SamplingRecord:
 
 @dataclass(frozen=True)
 class SourcedSamplingRecord:
-    """
-    Wrapper untuk mempertahankan source worksheet
-    dari sebuah SamplingRecord.
+    """Record QC beserta nama worksheet asal untuk penelusuran data.
 
-    SamplingRecord tetap menjadi normalized QC record.
-    Source worksheet merupakan provenance/traceability
-    yang ditambahkan pada orchestration layer.
+    Wrapper frozen ini tidak mengubah isi SamplingRecord. Record yang dibungkus
+    tetap mutable; frozen hanya membatasi penggantian atribut wrapper.
 
-    Wrapper ini tidak mengubah isi SamplingRecord.
+    Attributes:
+        source_worksheet (str): Nama worksheet sumber; argumen konstruktor.
+        record (SamplingRecord): Record yang dibungkus; argumen konstruktor.
+
+    Examples:
+        >>> from datetime import date
+        >>> record = SamplingRecord(
+        ...     date(2026, 9, 22), "08:00", "SP-01", "pH", "-", 6, 9, 7.2
+        ... )
+        >>> SourcedSamplingRecord("shift-pagi", record).to_row()[0]
+        'shift-pagi'
     """
 
     source_worksheet: str
     record: SamplingRecord
 
     def to_row(self) -> list:
-        """
-        Representasi row dengan source worksheet
-        sebagai kolom provenance pertama.
+        """Menambahkan nama worksheet di depan delapan nilai record.
 
-        Method ini disiapkan untuk CP4 berikutnya.
-        Existing exporter belum menggunakan method ini
-        pada CP4.1.
+        Returns:
+            list: Sembilan nilai dengan source_worksheet sebagai kolom pertama.
         """
 
         return [

@@ -10,17 +10,55 @@ from src.monthly_mining_orchestrator import (
     NoWeekFoldersFoundError,
 )
 
+"""CLI entry point untuk monthly QC Data Mining NEXARIONT.
+
+Module ini menangani command-line interface untuk pemrosesan satu monthly source
+root menjadi satu consolidated QC workbook.
+
+Responsibility module dibatasi pada:
+- parsing CLI;
+- validasi input/master/output path;
+- penentuan default output filename;
+- pemanggilan MonthlyMiningOrchestrator;
+- presentation progress dan final summary;
+- process exit behavior.
+
+Week/domain/workbook discovery, workbook processing, dan monthly consolidation
+ditangani oleh application components di bawah MonthlyMiningOrchestrator.
+"""
 
 MASTER_BASENAME = "Master-Data.xlsx"
 
 
 def safe_name(value: str) -> str:
+    """Mengubah text menjadi nama file yang aman untuk output monthly workbook.
+
+    Karakter yang tidak valid pada nama file diganti dengan underscore dan
+    whitespace berurutan dinormalisasi menjadi satu underscore.
+
+    Args:
+        value (str): Text sumber, biasanya nama monthly source folder.
+
+    Returns:
+        str: Nama yang telah dinormalisasi. Mengembalikan "MONTH" jika hasil
+        normalisasi kosong.
+    """
     cleaned = re.sub(r'[<>:"/\\|?*]+', "_", value)
     cleaned = re.sub(r"\s+", "_", cleaned.strip())
     return cleaned or "MONTH"
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Membuat command-line parser untuk monthly QC mining.
+
+    CLI mempertahankan source/output separation sehingga monthly source dapat
+    berasal dari local maupun UNC/server path dan consolidated output dapat
+    disimpan pada lokasi berbeda.
+
+    Returns:
+        argparse.ArgumentParser: Parser dengan argument --input-root,
+        --output-dir, --master, --output-name, dan --overwrite.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "NEXARIONT QC monthly runner. "
@@ -73,6 +111,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Menjalankan monthly QC mining dari command line.
+
+    Method memvalidasi monthly source root dan canonical master, menentukan
+    final output filename, melindungi existing output kecuali --overwrite
+    digunakan, lalu mendelegasikan execution ke MonthlyMiningOrchestrator.
+
+    Progress dari orchestrator ditampilkan melalui callback print. Setelah
+    processing selesai, method menampilkan execution summary termasuk workbook,
+    candidate record, worksheet status, execution failure, output-read error,
+    serta discovery condition.
+
+    Returns:
+        int: 0 jika monthly orchestration selesai dan final summary dapat
+        ditampilkan.
+
+    Raises:
+        SystemExit: Jika input root tidak tersedia, master tidak tersedia,
+            final output sudah ada tanpa --overwrite, tidak ditemukan folder
+            minggu, atau argparse mendeteksi invalid CLI usage.
+    """
     repo = Path(__file__).resolve().parent
     args = build_parser().parse_args()
 

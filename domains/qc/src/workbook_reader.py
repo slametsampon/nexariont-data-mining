@@ -8,17 +8,17 @@ from openpyxl import load_workbook
 
 @dataclass(frozen=True)
 class WorksheetInfo:
-    """
-    Metadata worksheet untuk discovery dan visibility filtering.
+    """Metadata worksheet untuk penemuan dan penyaringan berdasarkan visibilitas.
 
-    visibility menyimpan nilai visibility dari source workbook
-    dalam bentuk integer internal:
+    Attributes:
+        name (str): Nama worksheet; argumen konstruktor dataclass.
+        visibility (int): Status sumber: 0 visible, 1 hidden, 2 very hidden,
+            atau -1 untuk status .xlsx yang tidak dikenali.
+        is_visible (bool): Properti bernilai True hanya jika visibility adalah 0.
 
-        0 = visible
-        1 = hidden
-        2 = very hidden
-
-    Worksheet hanya menjadi candidate parsing jika visible.
+    Examples:
+        >>> WorksheetInfo("shift-pagi", 0).is_visible
+        True
     """
 
     name: str
@@ -30,8 +30,17 @@ class WorksheetInfo:
 
 
 class CellAdapter:
-    """
-    Minimal cell interface yang digunakan parser.
+    """Representasi sel minimum yang dibutuhkan parser laporan QC.
+
+    Args:
+        value (Any): Nilai sel yang telah dikonversi dari xlrd.
+        row (int): Nomor baris bergaya Excel, dimulai dari 1.
+        column (int): Nomor kolom bergaya Excel, dimulai dari 1.
+
+    Attributes:
+        value (Any): Isi sel; None untuk sel kosong atau di luar batas sheet.
+        row (int): Nomor baris yang diminta.
+        column (int): Nomor kolom yang diminta.
     """
 
     def __init__(
@@ -46,12 +55,18 @@ class CellAdapter:
 
 
 class XlsWorksheetAdapter:
-    """
-    Adapter agar worksheet xlrd (.xls) menyediakan
-    interface minimum yang dibutuhkan ShiftReportParser.
+    """Menyediakan antarmuka worksheet bagi sumber .xls yang dibaca xlrd.
 
-    Tidak membuat file .xlsx sementara.
-    Original .xls hanya dibaca.
+    Menyediakan cell() dan iter_rows() dengan indeks mulai dari 1 agar parser
+    dapat membaca .xls tanpa membuat file .xlsx sementara. Nilai tanggal serial
+    xlrd tidak dikonversi menjadi objek tanggal oleh adapter ini.
+
+    Args:
+        sheet (xlrd.sheet.Sheet): Worksheet sumber dari workbook xlrd.
+
+    Attributes:
+        max_row (int): Jumlah baris pada worksheet sumber.
+        max_column (int): Jumlah kolom pada worksheet sumber.
     """
 
     def __init__(self, sheet: xlrd.sheet.Sheet):
@@ -181,14 +196,23 @@ class XlsWorksheetAdapter:
 
 
 class WorkbookReader:
-    """
-    Input reader/factory.
+    """Membaca worksheet dan metadata workbook .xls atau .xlsx.
 
-    Supported:
-    - .xls  : xlrd + adapter
-    - .xlsx : openpyxl
+    Format .xls menggunakan xlrd dan XlsWorksheetAdapter. Format .xlsx
+    menggunakan openpyxl dengan data_only=True dan read_only=True, sehingga
+    nilai formula mengikuti cache workbook. Konstruktor hanya menyimpan path;
+    validasi file dilakukan saat metode pembacaan dipanggil.
 
-    Parser tidak perlu mengetahui format source.
+    Args:
+        file_path (Path): Lokasi workbook sumber.
+
+    Attributes:
+        file_path (Path): Path sumber yang telah dikonversi menjadi Path.
+
+    Examples:
+        reader = WorkbookReader(Path("laporan.xlsx"))
+        names = reader.get_visible_worksheet_names()
+        worksheet = reader.load_worksheet(names[0])
     """
 
     def __init__(
@@ -343,6 +367,20 @@ class WorkbookReader:
         self,
         worksheet_name: str,
     ):
+
+        """Membaca satu worksheet melalui reader yang sesuai ekstensi sumber.
+
+        Args:
+            worksheet_name (str): Nama worksheet persis seperti di workbook.
+
+        Returns:
+            XlsWorksheetAdapter | openpyxl.worksheet._read_only.ReadOnlyWorksheet:
+            Worksheet dengan antarmuka cell(), iter_rows(), max_row, dan max_column.
+
+        Raises:
+            FileNotFoundError: File sumber tidak ditemukan.
+            ValueError: Ekstensi tidak didukung atau nama worksheet tidak ditemukan.
+        """
 
         if not self.file_path.exists():
             raise FileNotFoundError(

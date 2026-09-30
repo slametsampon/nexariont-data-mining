@@ -19,7 +19,27 @@ PROVENANCE_HEADERS = [
 
 
 class MonthlyWorkbookConsolidator:
-    """Build the consolidated monthly workbook from per-workbook outputs."""
+    """Menggabungkan hasil per workbook menjadi workbook QC bulanan.
+
+    Instance menyimpan akumulasi satu proses bulanan di memori. Informasi
+    month, week, domain, dan source_workbook ditambahkan pada data dan log.
+    Gunakan finalize() setelah seluruh hasil dan kondisi sumber dicatat.
+
+    Attributes:
+        workbook (openpyxl.Workbook): Workbook konsolidasi yang sedang dibangun.
+        ws_data (Worksheet): Worksheet Data_Mining.
+        ws_control (Worksheet): Worksheet Control berisi bagian per sumber.
+        ws_log (Worksheet): Worksheet Processing_Log.
+        ws_summary (Worksheet): Worksheet Run_Summary.
+        data_header_state (dict): Header data acuan; nilai "header" awalnya None.
+        log_header_state (dict): Header log acuan; nilai "header" awalnya None.
+        totals (Counter): Akumulasi hitungan workbook, worksheet, record, dan error.
+
+    Examples:
+        consolidator = MonthlyWorkbookConsolidator()
+        # Tambahkan hasil melalui consolidate_workbook(item, temp_output).
+        totals = consolidator.finalize(Path("hasil_bulanan.xlsx"))
+    """
 
     def __init__(self):
         self.workbook = Workbook()
@@ -172,6 +192,19 @@ class MonthlyWorkbookConsolidator:
         ])
 
     def finalize(self, final_output: Path) -> Counter:
+        """Melengkapi header dan format, lalu menyimpan hasil konsolidasi.
+
+        Args:
+            final_output (Path): Path file .xlsx tujuan. Direktori induk harus sudah
+                ada. File tujuan yang sudah ada dihapus sebelum workbook disimpan.
+
+        Returns:
+            Counter: Salinan hitungan total pemrosesan.
+
+        Raises:
+            OSError: File tujuan tidak dapat dihapus atau workbook tidak dapat disimpan.
+        """
+
         if self.data_header_state["header"] is None:
             self.ws_data.append(PROVENANCE_HEADERS + [
                 "Source Worksheet",
