@@ -43,6 +43,7 @@ class ShiftReportParser:
         self.config = config
         self.sampling_point_master = sampling_point_master
         self.domain = domain
+        self.last_diagnostics: list[str] = []
 
     # ---------------------------------------------------------
     # Public API
@@ -67,6 +68,9 @@ class ShiftReportParser:
                 atau teks tanggal tidak dapat dikonversi menjadi tanggal yang valid.
         """
 
+        # Diagnostics are per worksheet/parse call.
+        self.last_diagnostics = []
+
         block_columns = self._find_data_blocks(
             worksheet
         )
@@ -76,6 +80,13 @@ class ShiftReportParser:
                 "Tidak ditemukan header 'Item' "
                 "pada worksheet."
             )
+
+        # Record controlled recognition/mapping diagnostics before extraction.
+        # This does not change extraction decisions or source data.
+        self._collect_sampling_point_diagnostics(
+            worksheet=worksheet,
+            block_columns=block_columns,
+        )
 
         records: list[SamplingRecord] = []
 
@@ -105,64 +116,54 @@ class ShiftReportParser:
         worksheet,
     ) -> list[int]:
         """
-        Mencari semua kolom yang memiliki header 'Item'.
+        Mencari seluruh kolom horizontal data block yang terkontrol.
 
-        Contoh source:
+        Header ``Item`` tetap menjadi discovery mechanism utama. Bila
+        controlled Sampling Point Master dan domain tersedia, kolom yang
+        berisi Sampling Point yang exact-match terhadap Master digabungkan
+        dengan header-derived block. Ini mendukung mixed worksheet ketika
+        sebagian horizontal block memiliki header ``Item`` dan block lain
+        tidak memilikinya.
 
-        A = Item
-        B = Min
-        C = Max
-        D = Unit
-        E... = Sampling
-
-        I = Item
-        J = Min
-        K = Max
-        L = Unit
-        M... = Sampling
-
-        Dengan demikian satu worksheet dapat memiliki
-        lebih dari satu horizontal block.
+        Tanpa controlled Master/domain, behavior existing dipertahankan:
+        hanya block yang mempunyai header ``Item`` yang dikembalikan. Tidak
+        ada fuzzy/pattern inference.
         """
 
-        block_columns: list[int] = []
+        block_columns: set[int] = set()
+
+        # -----------------------------------------------------
+        # Header-based discovery.
+        # -----------------------------------------------------
 
         for row in worksheet.iter_rows():
-
             for cell in row:
-
                 if (
                     self._normalize_text(cell.value)
                     == self.config.item_header.lower()
                 ):
-                    block_columns.append(
+                    block_columns.add(
                         cell.column
                     )
 
-        header_blocks = sorted(
-            set(block_columns)
-        )
-
-        if header_blocks:
-            return header_blocks
-
         # -----------------------------------------------------
-        # Headerless worksheet fallback.
-        #
-        # Dipakai hanya bila controlled Master SSP + domain
-        # tersedia. Kolom block ditentukan dari cell source yang
-        # match terhadap Master SSP. Tidak ada fuzzy/pattern
-        # inference dan tidak mengubah path worksheet yang sudah
-        # memiliki header Item.
+        # Tanpa controlled Master/domain, pertahankan behavior
+        # existing: hanya header-derived blocks.
         # -----------------------------------------------------
 
         if (
             self.sampling_point_master is None
             or self.domain is None
         ):
-            return []
+            return sorted(block_columns)
 
-        master_block_columns: set[int] = set()
+        # -----------------------------------------------------
+        # Controlled Master augmentation.
+        #
+        # Digabungkan dengan header-derived blocks agar mixed
+        # worksheet dapat dikenali. Sampling Point yang tidak
+        # match terhadap Master tidak diinfer/fuzzy-matched.
+        # -----------------------------------------------------
 
         for row in worksheet.iter_rows():
             for cell in row:
@@ -173,11 +174,222 @@ class ShiftReportParser:
                     )
                     is not None
                 ):
-                    master_block_columns.add(
+                    block_columns.add(
                         cell.column
                     )
 
-        return sorted(master_block_columns)
+        return sorted(block_columns)
+
+    # ---------------------------------------------------------
+    # Extraction diagnostics / observability
+    # ---------------------------------------------------------
+
+    def _collect_sampling_point_diagnostics(
+        self,
+        worksheet,
+        block_columns: list[int],
+    ) -> None:
+        """Collect non-destructive Sampling Point recognition diagnostics.
+
+        The diagnostic scan is intentionally separate from extraction logic.
+        It reports two conditions that previously could remain silent:
+
+        - structurally plausible Sampling Point rows that do not match the
+          controlled Master; and
+        - source Sampling Point labels that are mapped to a different Master
+          output identity.
+
+        Candidate columns are limited to already discovered blocks plus columns
+        whose ``Time`` header is found in the same position expected by the
+        existing parser. Diagnostics never create records and never change the
+        set of parsed block columns.
+        """
+
+        if (
+            self.sampling_point_master is None
+            or self.domain is None
+        ):
+            return
+
+        discovered_columns = set(block_columns)
+        diagnostic_columns = set(discovered_columns)
+
+        # A Time header is existing structural evidence of a possible block.
+        # It is used only for diagnostic coverage, never to add extraction blocks.
+        for item_col in range(1, max(1, worksheet.max_column - 3)):
+            time_col = item_col + 4
+            if time_col > worksheet.max_column:
+                break
+            for row_number in range(1, min(30, worksheet.max_row) + 1):
+                if (
+                    self._normalize_text(
+                        self._cell_value(
+                            worksheet,
+                            row_number,
+                            time_col,
+                        )
+                    )
+                    == "time"
+                ):
+                    diagnostic_columns.add(item_col)
+                    break
+
+        diagnostics: list[str] = []
+        seen: set[tuple] = set()
+        undiscovered_columns_reported: set[int] = set()
+
+        for item_col in sorted(diagnostic_columns):
+            for row_number in range(1, worksheet.max_row + 1):
+                if not self._is_structural_sampling_point_candidate(
+                    worksheet,
+                    row_number,
+                    item_col,
+                ):
+                    continue
+
+                source_value = self._cell_value(
+                    worksheet,
+                    row_number,
+                    item_col,
+                )
+                source_text = str(source_value).strip()
+                location = f"R{row_number}C{item_col}"
+
+                matched = self.sampling_point_master.match(
+                    self.domain,
+                    source_value,
+                )
+
+                if matched is None:
+                    key = ("CANDIDATE_UNMATCHED", location, source_text)
+                    if key not in seen:
+                        diagnostics.append(
+                            "REVIEW SP_CANDIDATE_UNMATCHED "
+                            f"{location} source={source_text!r}"
+                        )
+                        seen.add(key)
+
+                    if (
+                        item_col not in discovered_columns
+                        and item_col not in undiscovered_columns_reported
+                    ):
+                        diagnostics.append(
+                            "WARNING BLOCK_NOT_DISCOVERED "
+                            f"C{item_col} candidate={location} "
+                            f"source={source_text!r}"
+                        )
+                        undiscovered_columns_reported.add(item_col)
+                    continue
+
+                output_identity = self.sampling_point_master.output_identity(
+                    self.domain,
+                    source_value,
+                    matched,
+                )
+                canonical_identity = str(output_identity).strip()
+
+                if source_text != canonical_identity:
+                    key = (
+                        "MAPPED",
+                        location,
+                        source_text,
+                        canonical_identity,
+                    )
+                    if key not in seen:
+                        diagnostics.append(
+                            "TRACE SP_MAPPED "
+                            f"{location} source={source_text!r} "
+                            f"-> {canonical_identity!r}"
+                        )
+                        seen.add(key)
+                else:
+                    key = (
+                        "RECOGNIZED",
+                        location,
+                        source_text,
+                        canonical_identity,
+                    )
+                    if key not in seen:
+                        diagnostics.append(
+                            "TRACE SP_RECOGNIZED "
+                            f"{location} source={source_text!r} "
+                            f"-> {canonical_identity!r}"
+                        )
+                        seen.add(key)
+
+        self.last_diagnostics = diagnostics
+
+    def _is_structural_sampling_point_candidate(
+        self,
+        worksheet,
+        row_number: int,
+        item_col: int,
+    ) -> bool:
+        """Return the pre-Master structural Sampling Point signature only.
+
+        This helper intentionally mirrors the structural rule that existed
+        before Master recognition became the gate. It is used solely for
+        diagnostics, so an unmatched row is reported for review rather than
+        silently converted into a Sampling Point.
+        """
+
+        item = self._cell_value(
+            worksheet,
+            row_number,
+            item_col,
+        )
+
+        if self._is_blank(item) or self._is_total(item):
+            return False
+
+        # Verified diagnostic false-positives:
+        # ``pH`` and ``NPG+Free water`` are QC parameter labels,
+        # not Sampling Point identities.
+        # These exclusions are diagnostic-only; extraction logic is unchanged.
+        normalized_item = self._normalize_text(item)
+        if normalized_item in {
+            "ph",
+            "npg+free water",
+        }:
+            return False
+
+        minimum = self._cell_value(
+            worksheet,
+            row_number,
+            item_col + 1,
+        )
+        maximum = self._cell_value(
+            worksheet,
+            row_number,
+            item_col + 2,
+        )
+        unit = self._cell_value(
+            worksheet,
+            row_number,
+            item_col + 3,
+        )
+
+        if not (
+            self._is_blank(minimum)
+            and self._is_blank(maximum)
+            and self._is_blank(unit)
+        ):
+            return False
+
+        sampling_cells = [
+            self._cell_value(
+                worksheet,
+                row_number,
+                item_col + 4 + offset,
+            )
+            for offset in range(self.config.max_sampling_columns)
+        ]
+
+        return any(
+            self._is_sampling_time(value)
+            or self._is_off(value)
+            for value in sampling_cells
+        )
 
     # ---------------------------------------------------------
     # Date extraction

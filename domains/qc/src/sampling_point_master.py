@@ -29,8 +29,14 @@ class SamplingPointMasterEntry:
 class SamplingPointMaster:
     """Referensi terkontrol untuk pengenalan identitas titik sampling.
 
-    Pencocokan dibatasi pada identitas kolom B yang dinormalisasi, kombinasi
-    B+C yang didukung, atau identitas dengan akhiran waktu (HH.MM)/(HH:MM).
+    Pencocokan mengutamakan identitas utama kolom B. Source text boleh
+    membawa keterangan parenthetical setelah primary identity bila primary
+    identity tersebut sendiri merupakan satu exact unique Master SSP pada
+    domain yang sama. Untuk primary identity berbentuk code yang mengandung
+    digit, exact identity juga dapat dikenali saat tertanam di source text
+    dengan alphanumeric boundary yang jelas dan hasil yang tetap unik.
+    Established source-label equivalence yang tidak dapat diturunkan dari
+    primary identity ditangani secara eksplisit dan sempit.
     Normalisasi mengabaikan kapitalisasi dan karakter selain a-z serta 0-9.
     Hasil ambigu dikembalikan sebagai None; tidak dilakukan pencocokan fuzzy.
 
@@ -45,6 +51,16 @@ class SamplingPointMaster:
         master = SamplingPointMaster.load(Path("master.xlsx"))
         entry = master.match("NPG", "SP-01")
     """
+
+    # User-established source labels that refer to an existing canonical
+    # Master Sampling Point but cannot be resolved from primary identity alone.
+    # Keep this list narrow; unknown labels remain unmatched.
+    _ESTABLISHED_SOURCE_EQUIVALENTS = {
+        ("npg", "npgflaker"): "npgproduk",
+        ("octanol", "d411"): "d411a",
+        ("octanol", "t170mid"): "t170middle",
+        ("octanol", "t170mdl"): "t170middle",
+    }
 
     def __init__(self, entries: list[SamplingPointMasterEntry]):
         self.entries = entries
@@ -74,9 +90,20 @@ class SamplingPointMaster:
             raise FileNotFoundError(f"Master SSP tidak ditemukan: {path}")
         wb = load_workbook(path, data_only=True, read_only=True)
         try:
-            if worksheet_name not in wb.sheetnames:
-                raise ValueError(f"Worksheet master SSP '{worksheet_name}' tidak ditemukan")
-            ws = wb[worksheet_name]
+            resolved_worksheet_name = worksheet_name
+
+            if resolved_worksheet_name not in wb.sheetnames:
+                if (
+                    resolved_worksheet_name == "QA Review"
+                    and "Sampling-Point" in wb.sheetnames
+                ):
+                    resolved_worksheet_name = "Sampling-Point"
+                else:
+                    raise ValueError(
+                        f"Worksheet master SSP '{worksheet_name}' tidak ditemukan"
+                    )
+
+            ws = wb[resolved_worksheet_name]
             entries = []
             for row_number, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                 domain, identity, description = (list(row) + [None, None, None])[:3]
@@ -130,14 +157,82 @@ class SamplingPointMaster:
         if len(combined) > 1:
             return None
 
-        # 3. User-established P-xxx case: remove trailing time only when the
-        # stripped base is itself an exact, unique master SSP in this domain.
+        # 3. Established trailing-time case. Keep this explicit behavior first.
         m = re.fullmatch(r"\s*(.*?)\s*\(\s*\d{1,2}[.:]\d{2}\s*\)\s*", source)
         if m:
             base_key = self._norm(m.group(1))
             stripped = [e for e in candidates if self._norm(e.sampling_identity) == base_key]
             if len(stripped) == 1:
                 return stripped[0]
+
+        # 4. Human-entered parenthetical description after a unique primary SSP.
+        #
+        # Examples established in current verification:
+        #   CA-2203 (T-2201 Reflux Liquid) -> CA-2203
+        #   NPG PRODUK (FLAKE)             -> NPG PRODUK
+        #
+        # Exact primary/B+C matching above still takes precedence. This rule is
+        # only allowed when the text before the final parentheses is itself an
+        # exact unique Master primary identity; duplicate/ambiguous B remains
+        # unmatched. No semantic/fuzzy comparison of the parenthetical text is
+        # performed.
+        m = re.fullmatch(r"\s*(.*?)\s*\(\s*[^()]+?\s*\)\s*", source)
+        if m:
+            base_key = self._norm(m.group(1))
+            annotated = [
+                e
+                for e in candidates
+                if self._norm(e.sampling_identity) == base_key
+            ]
+            if len(annotated) == 1:
+                return annotated[0]
+            if len(annotated) > 1:
+                return None
+
+        # 5. Exact embedded primary identity for code-like SSP identities.
+        #
+        # This rule addresses human-entered source text where the established
+        # Master primary identity is still present exactly, but extra words are
+        # placed before/after it, for example:
+        #   D-312 water (Crude EPA Decanter) -> D-312
+        #   Produk IBA ( TK-725)             -> TK-725
+        #
+        # To keep matching conservative:
+        # - only identities containing at least one digit are considered;
+        # - matching uses alphanumeric boundaries, not arbitrary substring;
+        # - duplicate Master primary identities remain ambiguous;
+        # - more than one distinct embedded primary identity returns None;
+        # - no fuzzy or semantic comparison is performed.
+        embedded_by_key: dict[str, list[SamplingPointMasterEntry]] = {}
+        for entry in candidates:
+            identity = entry.sampling_identity
+            if not any(ch.isdigit() for ch in identity):
+                continue
+            if not self._contains_primary_identity(source, identity):
+                continue
+            embedded_by_key.setdefault(self._norm(identity), []).append(entry)
+
+        if len(embedded_by_key) == 1:
+            embedded = next(iter(embedded_by_key.values()))
+            if len(embedded) == 1:
+                return embedded[0]
+            return None
+        if len(embedded_by_key) > 1:
+            return None
+
+        # 6. Narrow user-established source-label equivalence. This is not
+        # fuzzy matching: both source label and target primary are explicit.
+        target_key = self._ESTABLISHED_SOURCE_EQUIVALENTS.get(
+            (self._norm(domain), source_key)
+        )
+        if target_key:
+            equivalent = [
+                e
+                for e in candidates
+                if self._norm(e.sampling_identity) == target_key
+            ]
+            if len(equivalent) == 1:
+                return equivalent[0]
 
         return None
 
@@ -166,6 +261,23 @@ class SamplingPointMaster:
             return str(source_text).strip()
 
         return matched_entry.sampling_identity
+
+    @staticmethod
+    def _contains_primary_identity(source_text: str, identity: str) -> bool:
+        """Check exact code identity inside source text with safe boundaries.
+
+        Non-alphanumeric separators inside the Master identity are allowed to
+        vary in the source (e.g. ``D-312`` and ``D 312``), consistent with the
+        existing normalization rule. The identity must not be directly attached
+        to another alphanumeric character on either side.
+        """
+        tokens = re.findall(r"[a-z0-9]+", str(identity).casefold())
+        if not tokens:
+            return False
+
+        body = r"[^a-z0-9]*".join(re.escape(token) for token in tokens)
+        pattern = rf"(?<![a-z0-9]){body}(?![a-z0-9])"
+        return re.search(pattern, str(source_text).casefold()) is not None
 
     @staticmethod
     def _norm(value) -> str:

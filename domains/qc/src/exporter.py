@@ -1,3 +1,6 @@
+import ast
+import re
+
 from pathlib import Path
 from typing import Sequence
 
@@ -510,19 +513,128 @@ class ExcelExporter:
     # PROCESSING LOG — CP4.4
     # =====================================================
 
+    @staticmethod
+    def _split_processing_message(
+        message: str,
+    ) -> tuple[str, list[str]]:
+        """Pisahkan message summary dari diagnostic event yang terstruktur.
+
+        Service mempertahankan message sebagai string untuk kompatibilitas.
+        Exporter memecah diagnostic yang dikenali menjadi row EVENT agar dapat
+        dibaca/filter langsung di Excel. Message non-diagnostic tetap berada
+        pada row SUMMARY.
+        """
+
+        parts = [
+            part.strip()
+            for part in str(message or "").split(" | ")
+            if part.strip()
+        ]
+
+        summary_parts: list[str] = []
+        diagnostic_parts: list[str] = []
+
+        for part in parts:
+            if re.match(
+                r"^(TRACE|REVIEW|WARNING)\s+[A-Z_]+\b",
+                part,
+            ):
+                diagnostic_parts.append(part)
+            else:
+                summary_parts.append(part)
+
+        return " | ".join(summary_parts), diagnostic_parts
+
+    @staticmethod
+    def _literal_text(
+        value: str | None,
+    ) -> str:
+        """Kembalikan repr-style diagnostic value sebagai text biasa."""
+
+        if value is None:
+            return ""
+
+        value = value.strip()
+        if not value:
+            return ""
+
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return value.strip("'\"")
+
+        return "" if parsed is None else str(parsed)
+
+    @classmethod
+    def _parse_processing_event(
+        cls,
+        event_message: str,
+    ) -> dict[str, str]:
+        """Parse diagnostic event yang diterbitkan parser untuk presentation."""
+
+        parts = event_message.split(" ", 2)
+        if len(parts) < 2:
+            return {
+                "level": "",
+                "event": "",
+                "location": "",
+                "source_text": "",
+                "canonical_identity": "",
+            }
+
+        level = parts[0].strip()
+        event = parts[1].strip()
+        remainder = parts[2] if len(parts) >= 3 else ""
+
+        location_match = re.search(
+            r"\bR\d+C\d+\b",
+            remainder,
+        )
+
+        source_match = re.search(
+            r"\bsource=(.+?)(?=\s+->\s+|$)",
+            remainder,
+        )
+
+        canonical_match = re.search(
+            r"\s+->\s+(.+)$",
+            remainder,
+        )
+
+        return {
+            "level": level,
+            "event": event,
+            "location": (
+                location_match.group(0)
+                if location_match
+                else ""
+            ),
+            "source_text": cls._literal_text(
+                source_match.group(1)
+                if source_match
+                else None
+            ),
+            "canonical_identity": cls._literal_text(
+                canonical_match.group(1)
+                if canonical_match
+                else None
+            ),
+        }
+
     def _write_processing_log(
         self,
         workbook,
         worksheet_results,
     ) -> None:
-        """
-        Menulis execution trace processing per worksheet.
+        """Menulis summary worksheet dan diagnostic event sebagai row terpisah.
 
-        Data ditulis dari worksheet_results yang diterima
-        dari orchestration layer. Exporter tidak menentukan
-        ulang visibility, status, atau record count.
+        Row SUMMARY mempertahankan status/record count existing sehingga
+        monthly counting tetap menghitung satu status per worksheet. Row EVENT
+        sengaja mengosongkan Status dan Record Count agar diagnostic tidak
+        menggandakan worksheet count pada konsolidasi bulanan.
 
-        Processing_Log bukan QC validation/approval.
+        Processing_Log adalah execution/observability trace, bukan QC
+        validation/approval.
         """
 
         worksheet = workbook.create_sheet(
@@ -536,19 +648,58 @@ class ExcelExporter:
                 "Status",
                 "Record Count",
                 "Message",
+                "Entry Type",
+                "Level",
+                "Event",
+                "Location",
+                "Source Text",
+                "Canonical Identity",
             ]
         )
 
         for result in worksheet_results:
+            summary_message, diagnostic_events = (
+                self._split_processing_message(
+                    result.message
+                )
+            )
+
             worksheet.append(
                 [
                     result.worksheet_name,
                     result.visibility,
                     result.status,
                     result.record_count,
-                    result.message,
+                    summary_message,
+                    "SUMMARY",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
                 ]
             )
+
+            for event_message in diagnostic_events:
+                event = self._parse_processing_event(
+                    event_message
+                )
+
+                worksheet.append(
+                    [
+                        result.worksheet_name,
+                        result.visibility,
+                        "",
+                        "",
+                        event_message,
+                        "EVENT",
+                        event["level"],
+                        event["event"],
+                        event["location"],
+                        event["source_text"],
+                        event["canonical_identity"],
+                    ]
+                )
 
         self._format_header(
             worksheet
@@ -565,7 +716,13 @@ class ExcelExporter:
             "B": 14,
             "C": 14,
             "D": 16,
-            "E": 50,
+            "E": 70,
+            "F": 14,
+            "G": 10,
+            "H": 30,
+            "I": 14,
+            "J": 45,
+            "K": 35,
         }
 
         for column, width in (
@@ -575,3 +732,13 @@ class ExcelExporter:
                 column
             ].width = width
 
+        for row in worksheet.iter_rows(
+            min_row=2,
+            min_col=5,
+            max_col=11,
+        ):
+            for cell in row:
+                cell.alignment = Alignment(
+                    vertical="top",
+                    wrap_text=True,
+                )

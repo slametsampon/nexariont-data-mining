@@ -307,6 +307,14 @@ class QCDataMiningService:
                     sourced_records
                 )
 
+                diagnostics = list(
+                    self.parser.last_diagnostics
+                )
+
+                message = " | ".join(
+                    diagnostics
+                )
+
                 processing_result.worksheet_results.append(
                     WorksheetProcessingResult(
                         worksheet_name=(
@@ -315,11 +323,26 @@ class QCDataMiningService:
                         visibility="VISIBLE",
                         status="SUCCESS",
                         record_count=len(records),
-                        message="",
+                        message=message,
                     )
                 )
 
             except Exception as exc:
+
+                diagnostics = list(
+                    self.parser.last_diagnostics
+                )
+
+                message = (
+                    f"{type(exc).__name__}: "
+                    f"{exc}"
+                )
+
+                if diagnostics:
+                    message = (
+                        f"{message} | "
+                        + " | ".join(diagnostics)
+                    )
 
                 processing_result.worksheet_results.append(
                     WorksheetProcessingResult(
@@ -329,10 +352,7 @@ class QCDataMiningService:
                         visibility="VISIBLE",
                         status="ERROR",
                         record_count=0,
-                        message=(
-                            f"{type(exc).__name__}: "
-                            f"{exc}"
-                        ),
+                        message=message,
                     )
                 )
 
