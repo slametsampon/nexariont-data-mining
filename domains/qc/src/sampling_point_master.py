@@ -62,6 +62,44 @@ class SamplingPointMaster:
         ("octanol", "t170mdl"): "t170middle",
     }
 
+    # User-established mappings that require either:
+    # - an exact Master B+C entry because primary B is ambiguous; or
+    # - a narrowly approved source-domain -> Master-domain mapping.
+    #
+    # Value tuple:
+    #   (target_domain_key, target_primary_key, target_description_key_or_none)
+    _ESTABLISHED_SOURCE_ENTRY_EQUIVALENTS = {
+        # Utility D-931: explicit B+C disambiguation.
+        ("utility", "activatedcarbonfilterd931inlet"): (
+            "utility",
+            "d931",
+            "acfinlet",
+        ),
+        ("utility", "actifatedcarbonfilterd931inlet"): (
+            "utility",
+            "d931",
+            "acfinlet",
+        ),
+        ("utility", "activatedcarbonfilterd931outlet"): (
+            "utility",
+            "d931",
+            "acfoutlet",
+        ),
+        ("utility", "actifatedcarbonfilterd931outlet"): (
+            "utility",
+            "d931",
+            "acfoutlet",
+        ),
+
+        # Source workbook domain "Utility" -> controlled Master domain "Utility NPG".
+        ("utility", "ohe5101"): ("utilitynpg", "ohe5101", None),
+        ("utility", "overheade5101"): ("utilitynpg", "ohe5101", None),
+        ("utility", "bfwe5101"): ("utilitynpg", "bfwe5101", None),
+        ("utility", "bfw5101"): ("utilitynpg", "bfwe5101", None),
+        ("utility", "v2602"): ("utilitynpg", "v2602", None),
+        ("utility", "v2603"): ("utilitynpg", "v2603", None),
+    }
+
     def __init__(self, entries: list[SamplingPointMasterEntry]):
         self.entries = entries
         self._by_domain: dict[str, list[SamplingPointMasterEntry]] = {}
@@ -189,7 +227,32 @@ class SamplingPointMaster:
             if len(annotated) > 1:
                 return None
 
-        # 5. Exact embedded primary identity for code-like SSP identities.
+        # 5. Narrow user-established exact-entry equivalence.
+        #
+        # This takes precedence over generic embedded-primary matching because
+        # an explicitly approved B+C target may intentionally disambiguate a
+        # duplicate Master primary identity (for example D-931 ACF Inlet/Outlet).
+        # It does not enable general cross-domain or fuzzy matching.
+        entry_target = self._ESTABLISHED_SOURCE_ENTRY_EQUIVALENTS.get(
+            (self._norm(domain), source_key)
+        )
+        if entry_target:
+            target_domain_key, target_primary_key, target_description_key = entry_target
+            target_candidates = self._by_domain.get(target_domain_key, [])
+
+            equivalent = [
+                e
+                for e in target_candidates
+                if self._norm(e.sampling_identity) == target_primary_key
+                and (
+                    target_description_key is None
+                    or self._norm(e.description) == target_description_key
+                )
+            ]
+            if len(equivalent) == 1:
+                return equivalent[0]
+
+        # 6. Exact embedded primary identity for code-like SSP identities.
         #
         # This rule addresses human-entered source text where the established
         # Master primary identity is still present exactly, but extra words are
@@ -220,7 +283,7 @@ class SamplingPointMaster:
         if len(embedded_by_key) > 1:
             return None
 
-        # 6. Narrow user-established source-label equivalence. This is not
+        # 7. Narrow user-established source-label equivalence. This is not
         # fuzzy matching: both source label and target primary are explicit.
         target_key = self._ESTABLISHED_SOURCE_EQUIVALENTS.get(
             (self._norm(domain), source_key)
@@ -249,7 +312,28 @@ class SamplingPointMaster:
         match keeps the exact source identity so distinct Sampling Points remain
         distinct without inventing a new canonical B+C representation.
         """
-        candidates = self._by_domain.get(self._norm(domain), [])
+        source_domain_key = self._norm(domain)
+        source_key = self._norm(source_text)
+
+        # Explicit B+C aliases collapse spelling variants to the controlled
+        # Master B+C textual representation already used by this matcher.
+        entry_target = self._ESTABLISHED_SOURCE_ENTRY_EQUIVALENTS.get(
+            (source_domain_key, source_key)
+        )
+        if entry_target:
+            target_domain_key, target_primary_key, target_description_key = entry_target
+            if (
+                target_description_key is not None
+                and self._norm(matched_entry.domain) == target_domain_key
+                and self._norm(matched_entry.sampling_identity) == target_primary_key
+                and self._norm(matched_entry.description) == target_description_key
+            ):
+                return (
+                    f"{matched_entry.sampling_identity} "
+                    f"({matched_entry.description})"
+                )
+
+        candidates = self._by_domain.get(source_domain_key, [])
         primary_key = self._norm(matched_entry.sampling_identity)
         same_primary = [
             entry
